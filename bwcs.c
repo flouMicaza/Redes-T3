@@ -151,6 +151,14 @@ void *bwss_connect(void *ptr) {
 		    	received_ack = 1;
 		    	continue;
 		    }
+		    else if(receivedSeqNum < ack_bit){
+		    	received_ack = -1;
+		    	continue;
+		    }
+		    else if(receivedSeqnum > ack_bit){
+		    	received_ack = receivedSeqnum;
+		    	continue;
+		    }
 	    } else if(bwc_buffer[0] == 'D') {
 	    	memset(final_bwssbuff, 0, BUFFER_LENGTH + DHDR);
 	    	final_bwssbuff[0] = 'A';
@@ -219,7 +227,8 @@ void* connect_client(void *pcl){
 
 	//**************LLenar por primera vez ventana******************************
 	//*************************************************************************
-	for(int i = 0; i < WIN_SZ; i++){
+	int i;
+	for(i = 0; i < WIN_SZ; i++){
 		cnt = Dread(bwc_socket, bwss_buffer, BUFFER_LENGTH); // lectura del socket bwc al buffer de bwss
 		if(cnt <= 0) break; // condicion de quiebre. Lectura de EOF
 	    // DEBO MODIFICAR BUFFER PARA CONTENER HEADER
@@ -237,20 +246,8 @@ void* connect_client(void *pcl){
 
 	/* Proceso de lectura y escritura desde bwc a bwss */
 	for(bytes=0;; bytes+=cnt) {
-        cnt = Dread(bwc_socket, bwss_buffer, BUFFER_LENGTH); // lectura del socket bwc al buffer de bwss
         if(cnt <= 0) break; // condicion de quiebre. Lectura de EOF
 
-        // DEBO MODIFICAR BUFFER PARA CONTENER HEADER
-        final_bwssbuff[DTYPE] = 'D';
-        addNumSeq(frame_seq, final_bwssbuff);
-        copyArray(0, DHDR, BUFFER_LENGTH + DHDR, bwss_buffer, final_bwssbuff);
-       
-        ack_bit = frame_seq; // ACK que espera como confirmacion 
-        frame_seq = (frame_seq + 1) % MAX_SEQ; // Proximo numero de secuencia a enviar
-
-        DwriteUDP(bwss_socket, final_bwssbuff, cnt + DHDR); // escritura del buffer de bwss al socket UDP
-        
-        // AGREGAR TIMEOUT Y HACER QUE ESPERE
         do {
         	t = clock();
         	while(!received_ack && (((double)(tEnd = clock() - t) / CLOCKS_PER_SEC) < timeout));
@@ -263,6 +260,7 @@ void* connect_client(void *pcl){
 
         received_ack = 0;
 	}
+
 	ack_bit = frame_seq; // ack del eof
 	final_bwssbuff[DTYPE] = 'D';
     addNumSeq(frame_seq, final_bwssbuff);
