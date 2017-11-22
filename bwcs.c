@@ -252,11 +252,41 @@ void* connect_client(void *pcl){
         	t = clock();
         	while(!received_ack && (((double)(tEnd = clock() - t) / CLOCKS_PER_SEC) < timeout));
 
-        	if(!received_ack) {
-        		fprintf(stderr, "REENVIANDO: ");
-        		DwriteUDP(bwss_socket, final_bwssbuff, cnt + DHDR); 
+        	//se reenvia roda la ventana CIRCULARMENTE
+        	if(received_ack == -1){
+				printf(stderr, "REENVIANDO TODA LA VENTANA: ");
+        		for(int k = (ack_bit % WIN_SZ); k < (ack_bit + WIN_SZ) %WIN_SZ; k++){
+        			DwriteUDP(bwss_socket, window[k], cnt + DHDR);
+        		}
         	}
-        } while(!received_ack);
+
+        	else if(received_ack == 1){
+        		ack_bit++;
+        		cnt = Dread(bwc_socket, bwss_buffer, BUFFER_LENGTH);
+        		if(cnt <= 0) break;
+        		window[frame_seq % WIN_SZ][DTYPE] = 'D';
+        		addNumSeq(frame_seq, window[frame_seq % WIN_SZ]);
+	   	 		copyArray(0, DHDR, BUFFER_LENGTH + DHDR, bwss_buffer, window[frame_seq % WIN_SZ]);
+	       		frame_seq ++;
+	       		DwriteUDP(bwss_socket, window[k], cnt + DHDR);
+        	}
+        	if(cnt <= 0) break;
+
+
+        	else if(received_ack > 1) {
+        		for(int k = ack_bit % WIN_SZ; k <= received_ack % WIN_SZ; k++){
+        			cnt = Dread(bwc_socket, bwss_buffer, BUFFER_LENGTH);
+        			if(cnt <= 0) break;
+	        		window[frame_seq % WIN_SZ][DTYPE] = 'D';
+	        		addNumSeq(frame_seq, window[frame_seq % WIN_SZ]);
+		   	 		copyArray(0, DHDR, BUFFER_LENGTH + DHDR, bwss_buffer, window[frame_seq % WIN_SZ]);
+		       		frame_seq ++;
+		       		DwriteUDP(bwss_socket, window[k], cnt + DHDR);
+	        	}
+        	}
+        	if(cnt <= 0) break;
+
+        } while(1);
 
         received_ack = 0;
 	}
