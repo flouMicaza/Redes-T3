@@ -155,8 +155,8 @@ void *bwss_connect(void *ptr) {
 		    	received_ack = -1;
 		    	continue;
 		    }
-		    else if(receivedSeqnum > ack_bit){
-		    	received_ack = receivedSeqnum;
+		    else if(receivedSeqNum > ack_bit){
+		    	received_ack = receivedSeqNum;
 		    	continue;
 		    }
 	    } else if(bwc_buffer[0] == 'D') {
@@ -268,7 +268,7 @@ void* connect_client(void *pcl){
         		addNumSeq(frame_seq, window[frame_seq % WIN_SZ]);
 	   	 		copyArray(0, DHDR, BUFFER_LENGTH + DHDR, bwss_buffer, window[frame_seq % WIN_SZ]);
 	       		frame_seq ++;
-	       		DwriteUDP(bwss_socket, window[k], cnt + DHDR);
+	       		DwriteUDP(bwss_socket, window[frame_seq % WIN_SZ], cnt + DHDR);
         	}
         	if(cnt <= 0) break;
 
