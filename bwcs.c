@@ -11,11 +11,12 @@
 #include <pthread.h>
 #include <time.h>
 
-char bwc_buffer[WIN_SZ][BUFFER_LENGTH + DHDR]; // buffer entre bwss y bwcs (UDP)
-char bwss_buffer[WIN_SZ][BUFFER_LENGTH]; // buffer entre bwc y bwcs (TCP)
-char final_bwssbuff[WIN_SZ][BUFFER_LENGTH + DHDR]; // buffer entre bwcs y bwss (UDP)
-char final_bwcbuff[WIN_SZ][BUFFER_LENGTH]; // buffer entre bwcs y bwc (TCP)
+char bwc_buffer[BUFFER_LENGTH + DHDR]; // buffer entre bwss y bwcs (UDP)
+char bwss_buffer[BUFFER_LENGTH]; // buffer entre bwc y bwcs (TCP)
+char final_bwssbuff[BUFFER_LENGTH + DHDR]; // buffer entre bwcs y bwss (UDP)
+char final_bwcbuff[BUFFER_LENGTH]; // buffer entre bwcs y bwc (TCP)
 char window[WIN_SZ][BUFFER_LENGTH]; //ventana que conitene paquetes (buffers)
+
 
 pthread_t bwss_thread; // thread de TCP a UDP
 pthread_t bwc_thread; // thread de UDP a TCP
@@ -29,7 +30,6 @@ int ready; // indicara cuando se habra terminado la escritura hacia bwc (retorno
 
 int ack_bit; // Indica el numero de secuencia del ACK que se espera
 int frame_seq; // Indica el numero de secuencia del paquete que 
-int last_received; //Indica el numero de secuencia del ultimo que recibimos el ack
 int timeout; // Es el timeout que se utilizara
 int received_ack; // Indica si se recibe el ACK;
 
@@ -215,28 +215,21 @@ void* connect_client(void *pcl){
     free(pcl);
 
 	DwriteUDP(bwss_socket, bwss_buffer, 0); // mensaje enviado para "confirmar" conexion con bwss
-	for (int i = 0; i < WIN_SZ; ++i) //se llena la ventana de paquetes. 
-		{
-
-        	cnt = Dread(bwc_socket, bwss_buffer[i], BUFFER_LENGTH); // lectura del socket bwc al buffer de bwss
-        	if(cnt <= 0) break; // condicion de quiebre. Lectura de EOF
-        	// DEBO MODIFICAR BUFFER PARA CONTENER HEADER
-        	final_bwssbuff[i][DTYPE] = 'D';
-
-        	addNumSeq(frame_seq, final_bwssbuff[i]);
-        	copyArray(0, DHDR, BUFFER_LENGTH + DHDR, bwss_buffer[i], final_bwssbuff[i]);
-        	ack_bit = frame_seq; // ACK que espera como confirmacion 
-        	frame_seq = (frame_seq + 1) % MAX_SEQ; // Proximo numero de secuencia a enviar
-
-        	DwriteUDP(bwss_socket, final_bwssbuff, cnt + DHDR); // escritura del buffer de bwss al socket UDP
-        
-
-		}
+	
 	/* Proceso de lectura y escritura desde bwc a bwss */
 	for(bytes=0;; bytes+=cnt) {
-		
-        
+        cnt = Dread(bwc_socket, bwss_buffer, BUFFER_LENGTH); // lectura del socket bwc al buffer de bwss
+        if(cnt <= 0) break; // condicion de quiebre. Lectura de EOF
+
+        // DEBO MODIFICAR BUFFER PARA CONTENER HEADER
+        final_bwssbuff[DTYPE] = 'D';
+        addNumSeq(frame_seq, final_bwssbuff);
+        copyArray(0, DHDR, BUFFER_LENGTH + DHDR, bwss_buffer, final_bwssbuff);
        
+        ack_bit = frame_seq; // ACK que espera como confirmacion 
+        frame_seq = (frame_seq + 1) % MAX_SEQ; // Proximo numero de secuencia a enviar
+
+        DwriteUDP(bwss_socket, final_bwssbuff, cnt + DHDR); // escritura del buffer de bwss al socket UDP
         
         // AGREGAR TIMEOUT Y HACER QUE ESPERE
         do {
