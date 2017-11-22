@@ -15,7 +15,7 @@ char bwc_buffer[BUFFER_LENGTH + DHDR]; // buffer entre bwss y bwcs (UDP)
 char bwss_buffer[BUFFER_LENGTH]; // buffer entre bwc y bwcs (TCP)
 char final_bwssbuff[BUFFER_LENGTH + DHDR]; // buffer entre bwcs y bwss (UDP)
 char final_bwcbuff[BUFFER_LENGTH]; // buffer entre bwcs y bwc (TCP)
-char window[WIN_SZ][BUFFER_LENGTH]; //ventana que conitene paquetes (buffers)
+char window[WIN_SZ][BUFFER_LENGTH + DHDR]; //ventana que conitene paquetes (buffers)
 
 
 pthread_t bwss_thread; // thread de TCP a UDP
@@ -29,7 +29,7 @@ int bwss_socket;
 int ready; // indicara cuando se habra terminado la escritura hacia bwc (retorno del mensaje) para soltar el socket
 
 int ack_bit; // Indica el numero de secuencia del ACK que se espera
-int frame_seq; // Indica el numero de secuencia del paquete que 
+int frame_seq; // Indica el numero de secuencia del paquete que envia
 int timeout; // Es el timeout que se utilizara
 int received_ack; // Indica si se recibe el ACK;
 
@@ -216,6 +216,25 @@ void* connect_client(void *pcl){
 
 	DwriteUDP(bwss_socket, bwss_buffer, 0); // mensaje enviado para "confirmar" conexion con bwss
 	
+
+	//**************LLenar por primera vez ventana******************************
+	//*************************************************************************
+	for(int i = 0; i < WIN_SZ; i++){
+		cnt = Dread(bwc_socket, bwss_buffer, BUFFER_LENGTH); // lectura del socket bwc al buffer de bwss
+		if(cnt <= 0) break; // condicion de quiebre. Lectura de EOF
+	    // DEBO MODIFICAR BUFFER PARA CONTENER HEADER
+	    window[i][DTYPE] = 'D';
+
+	    addNumSeq(frame_seq, window[i]);
+	    copyArray(0, DHDR, BUFFER_LENGTH + DHDR, bwss_buffer, window[i]);
+	    
+	    //ack_bit = frame_seq; // ACK que espera como confirmacion 
+
+	    frame_seq ++; // Proximo numero de secuencia a enviar
+	    DwriteUDP(bwss_socket, window[i], cnt + DHDR); // escritura del buffer de bwss al socket UDP
+	}
+
+
 	/* Proceso de lectura y escritura desde bwc a bwss */
 	for(bytes=0;; bytes+=cnt) {
         cnt = Dread(bwc_socket, bwss_buffer, BUFFER_LENGTH); // lectura del socket bwc al buffer de bwss
