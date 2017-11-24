@@ -16,6 +16,7 @@ char bwss_buffer[BUFFER_LENGTH]; // buffer entre bwc y bwcs (TCP)
 char final_bwssbuff[BUFFER_LENGTH + DHDR]; // buffer entre bwcs y bwss (UDP)
 char final_bwcbuff[BUFFER_LENGTH]; // buffer entre bwcs y bwc (TCP)
 char window[WIN_SZ][BUFFER_LENGTH + DHDR]; //ventana que conitene paquetes (buffers)
+char **windowAux;
 
 
 pthread_t bwss_thread; // thread de TCP a UDP
@@ -27,14 +28,19 @@ char *bwc_port; // puerto de bwc
 int bwc_socket;
 int bwss_socket;
 int ready; // indicara cuando se habra terminado la escritura hacia bwc (retorno del mensaje) para soltar el socket
+int end_received;
 
 int ack_bit; // Indica el numero de secuencia del ACK que se espera
 int frame_seq; // Indica el numero de secuencia del paquete que envia
 int timeout; // Es el timeout que se utilizara
 int received_ack; // Indica si se recibe el ACK;
+int receivedSeqNum;
+int ack_to_send;
+
 
 pthread_mutex_t mutex;
 pthread_cond_t cond;
+
 
 void *connect_client(void *pcl);
 void *bwc_connect(void * ptr); 
@@ -86,6 +92,11 @@ void addNumSeq(int frameSeq, char *buf) {
 int main(int argc, char **argv) {
     char *bwss_server;
 
+    windowAux = malloc(WIN_SZ * sizeof(char*));
+
+	for(int i = 0; i < WIN_SZ; i++)
+		windowAux[i] = malloc(BUFFER_LENGTH * sizeof(char));
+
     if(argc == 1) {
 		bwss_server = "localhost";
 		bwss_port = "2000";
@@ -129,7 +140,6 @@ int main(int argc, char **argv) {
    del paquete de retorno desde bwss a bwc */
 void *bwss_connect(void *ptr) {
 	int bytes, cnt;
-	int receivedSeqNum;
 	int lastReceivedSeqNum = -1; // permite descartar archivos duplicados
 
 
@@ -147,18 +157,26 @@ void *bwss_connect(void *ptr) {
 	    receivedSeqNum = getNumSeq(bwc_buffer);
 
 	    if(bwc_buffer[0] == 'A') {
+	    	printf("ACK de confirmacion recibido: %d \n", receivedSeqNum);
+	    	printf("ack_bit: %d\n",ack_bit);
 	    	if(receivedSeqNum == ack_bit) {
+	    		ack_to_send = receivedSeqNum;
 		    	received_ack = 1;
+		    	ack_bit++;
 		    	continue;
 		    }
 		    else if(receivedSeqNum < ack_bit){
+		    	printf("hay que reenviar desde el ack: %d\n", receivedSeqNum);
 		    	received_ack = -1;
 		    	continue;
 		    }
 		    else if(receivedSeqNum > ack_bit){
+		    	printf("recibimos uno mayor\n");
+		    	ack_bit = receivedSeqNum + 1;
 		    	received_ack = receivedSeqNum;
 		    	continue;
-		    }
+		    }	
+
 	    } else if(bwc_buffer[0] == 'D') {
 	    	memset(final_bwssbuff, 0, BUFFER_LENGTH + DHDR);
 	    	final_bwssbuff[0] = 'A';
@@ -223,6 +241,8 @@ void* connect_client(void *pcl){
     free(pcl);
 
 	DwriteUDP(bwss_socket, bwss_buffer, 0); // mensaje enviado para "confirmar" conexion con bwss
+
+	end_received = 1;
 	
 
 	//**************LLenar por primera vez ventana******************************
@@ -230,13 +250,18 @@ void* connect_client(void *pcl){
 	int i;
 	for(i = 0; i < WIN_SZ; i++){
 		cnt = Dread(bwc_socket, bwss_buffer, BUFFER_LENGTH); // lectura del socket bwc al buffer de bwss
-		if(cnt <= 0) break; // condicion de quiebre. Lectura de EOF
+		if(cnt <= 0){
+			end_received = 0;
+			break;
+		} // condicion de quiebre. Lectura de EOF
 	    // DEBO MODIFICAR BUFFER PARA CONTENER HEADER
 	    window[i][DTYPE] = 'D';
+	    memcpy(windowAux[i],bwss_buffer,strlen(bwss_buffer)+1);
 
 	    addNumSeq(frame_seq, window[i]);
 	    copyArray(0, DHDR, BUFFER_LENGTH + DHDR, bwss_buffer, window[i]);
 	    
+
 	    //ack_bit = frame_seq; // ACK que espera como confirmacion 
 
 	    frame_seq ++; // Proximo numero de secuencia a enviar
@@ -246,7 +271,7 @@ void* connect_client(void *pcl){
 
 	/* Proceso de lectura y escritura desde bwc a bwss */
 	for(bytes=0;; bytes+=cnt) {
-        if(cnt <= 0) break; // condicion de quiebre. Lectura de EOF
+        //if(cnt <= 0) break; // condicion de quiebre. Lectura de EOF
 
         do {
         	t = clock();
@@ -254,14 +279,16 @@ void* connect_client(void *pcl){
 
         	//se reenvia roda la ventana CIRCULARMENTE
         	if(received_ack == -1){
-				printf(stderr, "REENVIANDO TODA LA VENTANA: ");
-        		for(int k = (ack_bit % WIN_SZ); k < (ack_bit + WIN_SZ) %WIN_SZ; k++){
+				fprintf(stderr, "REENVIANDO TODA LA VENTANA: \n");
+        		for(int k = 0 ; k < (frame_seq % WIN_SZ )- 1; k++){
+        			printf("reenviando pakete n°  %d\n", k);
+        			addNumSeq(k, window[k]);
+	    			copyArray(0, DHDR, BUFFER_LENGTH + DHDR, windowAux[k], window[k]);
         			DwriteUDP(bwss_socket, window[k], cnt + DHDR);
         		}
         	}
 
-        	else if(received_ack == 1){
-        		ack_bit++;
+        	else if(received_ack == 1 && !end_received){
         		cnt = Dread(bwc_socket, bwss_buffer, BUFFER_LENGTH);
         		if(cnt <= 0) break;
         		window[frame_seq % WIN_SZ][DTYPE] = 'D';
@@ -270,10 +297,8 @@ void* connect_client(void *pcl){
 	       		frame_seq ++;
 	       		DwriteUDP(bwss_socket, window[frame_seq % WIN_SZ], cnt + DHDR);
         	}
-        	if(cnt <= 0) break;
 
-
-        	else if(received_ack > 1) {
+        	else if(received_ack > 1 && !end_received) {
         		for(int k = ack_bit % WIN_SZ; k <= received_ack % WIN_SZ; k++){
         			cnt = Dread(bwc_socket, bwss_buffer, BUFFER_LENGTH);
         			if(cnt <= 0) break;
@@ -284,8 +309,6 @@ void* connect_client(void *pcl){
 		       		DwriteUDP(bwss_socket, window[k], cnt + DHDR);
 	        	}
         	}
-        	if(cnt <= 0) break;
-
         } while(1);
 
         received_ack = 0;
